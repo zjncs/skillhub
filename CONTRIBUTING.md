@@ -7,8 +7,10 @@ preserve the existing architecture and product direction documented in
 [`docs/`](./docs).
 
 AI coding agents working in this repository should follow the rules in
-[`AGENTS.md`](./AGENTS.md), which documents repository architecture,
-dependency rules, and agent-specific conventions.
+[`AGENTS.md`](./AGENTS.md), which routes to the engineering conventions in
+[`.trellis/spec/index.md`](./.trellis/spec/index.md). These documents can be read
+without installing Trellis or any engineering Skill. Architecture and business
+design remain in `docs/`; execution tools and task records remain local.
 
 ## Before You Start
 
@@ -63,11 +65,15 @@ Before opening a pull request, make sure:
 
 - The branch is rebased or merged cleanly from the target branch.
 - Relevant backend tests pass.
-- Frontend typecheck/build passes when frontend files changed.
+- Frontend checks follow the [change-impact matrix](.trellis/spec/testing/index.md).
+  Changes limited to existing translation display text use its narrow exception;
+  frontend behavior or tooling changes require the applicable typecheck/build checks.
+  This does not waive required CI checks or failures in relevant existing tests.
 - `make generate-api` or `./scripts/check-openapi-generated.sh` has been run when
   backend API contracts changed.
 - Smoke coverage is updated when operator-facing workflows change.
 - The pull request description explains motivation, scope, and rollout impact.
+- Every commit is signed off and the CLA is signed (see below).
 
 ## Commit Style
 
@@ -76,6 +82,22 @@ Conventional-style subjects are preferred, for example:
 - `feat(auth): add local account login`
 - `fix(ops): align smoke test with csrf flow`
 - `docs(deploy): clarify runtime image usage`
+
+## Sign-off and CLA
+
+Two checks must pass before a pull request can be merged:
+
+- **DCO**: every commit needs a `Signed-off-by` trailer that matches the commit
+  author, certifying the [Developer Certificate of Origin](https://developercertificate.org/).
+  Use `git commit -s` when committing. To sign off commits you already pushed,
+  run `git commit --amend -s --no-edit` for the last commit, or
+  `git rebase --signoff <base>` for several, then `git push --force-with-lease`.
+- **CLA**: sign the Contributor License Agreement once through the
+  `license/cla` link that the CLA assistant posts on your first pull request.
+
+Both are your own attestations, so maintainers cannot complete them for you.
+Workflow runs on a first-time contributor's pull request also wait for a
+maintainer to approve them; that pending state is not a test failure.
 
 ## Reporting Security Issues
 

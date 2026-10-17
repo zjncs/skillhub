@@ -4,11 +4,16 @@ import { Link, useParams, useNavigate, useRouterState, useSearch } from '@tansta
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ArrowUpCircle, Boxes, ChevronDown, ChevronUp, Clock, Folder, Globe, Lock, RefreshCw, ShieldCheck, Terminal, User, Users } from 'lucide-react'
 import { MarkdownRenderer } from '@/features/skill/markdown-renderer'
+import { SkillVisibilityDialog } from '@/features/skill/skill-visibility-dialog'
+import { SkillAvatar } from '@/features/skill/skill-avatar'
+import { SkillAvatarTakedown } from '@/features/skill/skill-avatar-takedown'
 import { resolvePackageRelativeLink } from '@/features/skill/package-relative-link'
 import { FileTree } from '@/features/skill/file-tree'
 import { FilePreviewDialog } from '@/features/skill/file-preview-dialog'
 import type { FileTreeNode } from '@/features/skill/file-tree-builder'
 import type { SkillFile } from '@/api/types'
+import { getVersionPresentation } from '@/shared/lib/version-presentation'
+import { CopyButton } from '@/shared/components/copy-button'
 import { InstallCommand } from '@/features/skill/install-command'
 import { ShareButton } from '@/features/skill/share-button'
 import { InstallForAgentButton } from '@/features/skill/install-for-agent-button'
@@ -29,6 +34,7 @@ import { StarButton } from '@/features/social/star-button'
 import { SubscribeButton } from '@/features/social/subscribe-button'
 import { SkillReviews } from '@/features/social/skill-reviews'
 import { useAuth } from '@/features/auth/use-auth'
+import { useMyNamespaces } from '@/shared/hooks/use-namespace-queries'
 import { adminApi, ApiError, buildApiUrl, WEB_API_PREFIX } from '@/api/client'
 import { useSubmitSkillReport } from '@/features/report/use-skill-reports'
 import { SecurityAuditSummary } from '@/features/security-audit/security-audit-summary'
@@ -166,6 +172,7 @@ export function SkillDetailPage() {
   const overviewQuietGenerationRef = useRef(0)
   const { namespace, slug } = useParams({ from: '/space/$namespace/$slug' })
   const { user, hasRole } = useAuth()
+  const { data: myNamespaces } = useMyNamespaces(Boolean(user))
   const isPromotionAdmin = hasRole('SKILL_ADMIN') || hasRole('SUPER_ADMIN')
   const detailQueriesEnabled = isSkillDetailQueriesEnabled(skillDeleted)
   const qns = detailQueriesEnabled ? namespace : ''
@@ -194,6 +201,15 @@ export function SkillDetailPage() {
     ? requestedVersion
     : headlineVersion?.version ?? versions?.[0]?.version
   const selectedVersionEntry = versions?.find((version) => version.version === selectedVersion) ?? versions?.[0]
+  const selectedMetadata = selectedVersion === ownerPreviewVersion?.version ? ownerPreviewVersion
+    : selectedVersion === publishedVersion?.version ? publishedVersion
+      : selectedVersion === headlineVersion?.version ? headlineVersion : null
+  const { data: selectedVersionDetail } = useSkillVersionDetail(qns, qslug, selectedVersion, skillReady && !selectedMetadata)
+  const historicalMetadata = getVersionPresentation(selectedVersionDetail?.parsedMetadataJson)
+  const selectedDisplayName = selectedMetadata?.displayName ?? historicalMetadata.displayName ?? skill?.displayName
+  const selectedSummary = selectedMetadata?.summary ?? historicalMetadata.summary ?? skill?.summary
+  const showingUnpublishedPreview = selectedVersionEntry != null && selectedVersionEntry.status !== 'PUBLISHED'
+
   const { data: files } = useSkillFiles(qns, qslug, selectedVersion, skillReady)
   const documentationPath = resolveDocumentationFilePath(files)
   const { data: readme, error: readmeError } = useSkillReadme(qns, qslug, selectedVersion, documentationPath, skillReady)
@@ -598,21 +614,22 @@ export function SkillDetailPage() {
     }
     try {
       await deleteSkillMutation.mutateAsync({ namespace, slug, ownerId: skill.ownerId })
-      setSkillDeleted(true)
-      toast.success(
-        t('skillDetail.deleteSkillSuccessTitle'),
-        t('skillDetail.deleteSkillSuccessDescription', { skill: skill.displayName }),
-      )
-      setDeleteSkillInputOpen(false)
-      navigateAfterOverlays(() => {
-        navigate({ to: resolveDeletedSkillReturnTo(search.returnTo) })
-      })
-      queryClient.removeQueries({ queryKey: ['skills', namespace, slug] })
-      queryClient.invalidateQueries({ queryKey: ['skills', 'my'] })
-    } catch (error) {
-      toast.error(t('skillDetail.deleteSkillErrorTitle'), error instanceof Error ? error.message : '')
-      throw error
+    } catch {
+      // MutationCache already reports the error and handles expired sessions.
+      // Consume the button handler rejection without running success side effects.
+      return
     }
+    setSkillDeleted(true)
+    toast.success(
+      t('skillDetail.deleteSkillSuccessTitle'),
+      t('skillDetail.deleteSkillSuccessDescription', { skill: skill.displayName }),
+    )
+    setDeleteSkillInputOpen(false)
+    navigateAfterOverlays(() => {
+      navigate({ to: resolveDeletedSkillReturnTo(search.returnTo) })
+    })
+    queryClient.removeQueries({ queryKey: ['skills', namespace, slug] })
+    queryClient.invalidateQueries({ queryKey: ['skills', 'my'] })
   }
 
   const handleDeleteVersion = async () => {
@@ -897,7 +914,15 @@ export function SkillDetailPage() {
               </span>
             )}
           </div>
-          <h1 className="text-balance break-words text-4xl font-bold font-heading text-foreground [overflow-wrap:anywhere]">{skill.displayName}</h1>
+          <div className="flex items-center gap-4"><SkillAvatar name={selectedDisplayName ?? skill.displayName} url={skill.avatarUrl} size="h-16 w-16 text-2xl" /><h1 className="text-balance break-words text-4xl font-bold font-heading text-foreground [overflow-wrap:anywhere]">{selectedDisplayName}</h1></div>
+          <div className="flex min-w-0 items-center gap-2">
+            <code className="min-w-0 break-all text-sm text-muted-foreground">@{skill.namespace}/{skill.slug}</code>
+            <CopyButton text={`@${skill.namespace}/${skill.slug}`} ariaLabel={t('skillDetail.copyCoordinate')} className="shrink-0" />
+          </div>
+          {skill.avatarUrl && user?.userId !== skill.ownerId && (namespace === 'global'
+            ? isPromotionAdmin
+            : myNamespaces?.some((item) => item.slug === namespace && (item.currentUserRole === 'OWNER' || item.currentUserRole === 'ADMIN')))
+            && <SkillAvatarTakedown namespace={namespace} slug={slug} />}
           {skill.ownerDisplayName && (
             <div className="flex min-w-0">
               <div className="inline-flex max-w-full items-center gap-2 rounded-full border border-border/60 bg-background/85 px-3 py-1.5 text-sm text-muted-foreground shadow-sm backdrop-blur-sm">
@@ -908,8 +933,8 @@ export function SkillDetailPage() {
               </div>
             </div>
           )}
-          {skill.summary && (
-            <p className="text-lg text-muted-foreground leading-relaxed">{skill.summary}</p>
+          {selectedSummary && (
+            <p className="text-lg text-muted-foreground leading-relaxed">{selectedSummary}</p>
           )}
           {(skill.labels?.length ?? 0) > 0 && (
             <div className="flex flex-wrap gap-2">
@@ -930,10 +955,10 @@ export function SkillDetailPage() {
               ))}
             </div>
           )}
-          {isPendingPreview && (
+          {showingUnpublishedPreview && (
             <Card className="border-amber-500/30 bg-amber-500/5 p-4 text-sm text-muted-foreground">
-              <div className="font-medium text-foreground">{t('skillDetail.pendingPreviewTitle')}</div>
-              <p className="mt-1">{t('skillDetail.pendingPreviewDescription')}</p>
+              <div className="font-medium text-foreground">{t('skillDetail.unpublishedPreviewTitle')}</div>
+              <p className="mt-1">{t('skillDetail.unpublishedPreviewDescription')}</p>
             </Card>
           )}
           {hasRejectedOwnerPreview && (
@@ -1015,7 +1040,7 @@ export function SkillDetailPage() {
                     <div className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
                       {t('skillDetail.summaryLabel')}
                     </div>
-                    <p className="mt-2 text-sm leading-6 text-foreground">{skill.summary}</p>
+                    <p className="mt-2 text-sm leading-6 text-foreground">{selectedSummary}</p>
                   </div>
                 ) : null}
                 <div className="text-sm text-muted-foreground">
@@ -1178,7 +1203,7 @@ export function SkillDetailPage() {
           <div className="flex items-center justify-between">
             <div className="text-sm text-muted-foreground">{t('skillDetail.version')}</div>
             <div className="max-w-[11rem] break-all text-right font-mono font-semibold leading-snug text-foreground">
-              {headlineVersion ? `v${headlineVersion.version}` : '—'}
+              {selectedVersion ? `v${selectedVersion}` : '—'}
             </div>
           </div>
 
@@ -1472,6 +1497,9 @@ export function SkillDetailPage() {
               </div>
             </div>
             <div className="flex flex-col gap-3 pt-3 border-t border-border/40">
+              {skill.status === 'ACTIVE' && !skill.hidden && publishedVersion && <SkillVisibilityDialog
+                namespace={namespace} slug={slug} visibility={skill.visibility} disabled={hasPendingOwnerPreview} />}
+
               {skill.status === 'ARCHIVED' ? (
                 <Button variant="outline" onClick={() => setUnarchiveConfirmOpen(true)} disabled={unarchiveMutation.isPending}>
                   {unarchiveMutation.isPending ? t('skillDetail.processing') : t('skillDetail.unarchiveSkill')}

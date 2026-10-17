@@ -1,5 +1,6 @@
 package com.iflytek.skillhub.domain.review;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iflytek.skillhub.domain.audit.AuditDetail;
 import com.iflytek.skillhub.domain.event.PromotionApprovedEvent;
 import com.iflytek.skillhub.domain.event.PromotionRejectedEvent;
@@ -17,6 +18,7 @@ import com.iflytek.skillhub.domain.shared.exception.DomainBadRequestException;
 import com.iflytek.skillhub.domain.shared.exception.DomainForbiddenException;
 import com.iflytek.skillhub.domain.shared.exception.DomainNotFoundException;
 import com.iflytek.skillhub.domain.skill.*;
+import com.iflytek.skillhub.domain.skill.metadata.SkillMetadata;
 import jakarta.persistence.EntityManager;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -51,6 +53,12 @@ public class PromotionService {
     private final GovernanceNotificationService governanceNotificationService;
     private final EntityManager entityManager;
     private final Clock clock;
+    private final ObjectMapper objectMapper;
+    private com.iflytek.skillhub.domain.skill.service.SkillVisibilityService visibilityService;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setVisibilityService(com.iflytek.skillhub.domain.skill.service.SkillVisibilityService service) {
+        this.visibilityService = service;
+    }
 
     public PromotionService(PromotionRequestRepository promotionRequestRepository,
                             SkillRepository skillRepository,
@@ -62,7 +70,8 @@ public class PromotionService {
                             ApplicationEventPublisher eventPublisher,
                             GovernanceNotificationService governanceNotificationService,
                             EntityManager entityManager,
-                            Clock clock) {
+                            Clock clock,
+                            ObjectMapper objectMapper) {
         this.promotionRequestRepository = promotionRequestRepository;
         this.skillRepository = skillRepository;
         this.skillVersionRepository = skillVersionRepository;
@@ -74,6 +83,7 @@ public class PromotionService {
         this.governanceNotificationService = governanceNotificationService;
         this.entityManager = entityManager;
         this.clock = clock;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -216,9 +226,11 @@ public class PromotionService {
             }
             // Serialize approval with ordinary uploads that lock target Skill before publishing.
             entityManager.lock(targetSkill, jakarta.persistence.LockModeType.PESSIMISTIC_WRITE);
+            entityManager.refresh(targetSkill);
+            assertSkillActive(targetSkill);
+            if (visibilityService != null) { visibilityService.assertNoPendingVisibility(targetSkill.getId()); }
             assertTargetVersionAvailable(targetSkill.getId(), sourceVersion.getVersion());
-            targetSkill.setDisplayName(sourceSkill.getDisplayName());
-            targetSkill.setSummary(sourceSkill.getSummary());
+            applySourceVersionMetadata(targetSkill, sourceSkill, sourceVersion);
         } else {
             if (promotionRequestRepository.findActiveInitialBySourceSkillId(sourceSkill.getId()).isPresent()) {
                 throw new DomainBadRequestException("promotion.already_promoted", sourceSkill.getId());
@@ -226,8 +238,7 @@ public class PromotionService {
             assertTargetSkillNotExists(approvedRequest, sourceSkill);
             targetSkill = new Skill(approvedRequest.getTargetNamespaceId(), sourceSkill.getSlug(),
                     sourceSkill.getOwnerId(), SkillVisibility.PUBLIC);
-            targetSkill.setDisplayName(sourceSkill.getDisplayName());
-            targetSkill.setSummary(sourceSkill.getSummary());
+            applySourceVersionMetadata(targetSkill, sourceSkill, sourceVersion);
             targetSkill.setSourceSkillId(sourceSkill.getId());
             targetSkill.setCreatedBy(reviewerId);
             targetSkill.setUpdatedBy(reviewerId);
@@ -291,6 +302,22 @@ public class PromotionService {
         );
 
         return savedRequest;
+    }
+
+    private void applySourceVersionMetadata(Skill target, Skill source, SkillVersion sourceVersion) {
+        String metadataJson = sourceVersion.getParsedMetadataJson();
+        if (metadataJson == null || metadataJson.isBlank()) {
+            target.setDisplayName(source.getDisplayName());
+            target.setSummary(source.getSummary());
+            return;
+        }
+        try {
+            SkillMetadata metadata = objectMapper.readValue(metadataJson, SkillMetadata.class);
+            target.setDisplayName(metadata.displayName());
+            target.setSummary(metadata.description());
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to deserialize skill metadata", e);
+        }
     }
 
     private void assertTargetSkillNotExists(PromotionRequest approvedRequest, Skill sourceSkill) {

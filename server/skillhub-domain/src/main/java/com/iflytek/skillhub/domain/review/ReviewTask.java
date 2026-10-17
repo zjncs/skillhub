@@ -33,6 +33,31 @@ public class ReviewTask {
     @Column(name = "subject_version", nullable = false, length = 64)
     private String subjectVersion;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "previous_visibility", length = 20)
+    private com.iflytek.skillhub.domain.skill.SkillVisibility previousVisibility;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "requested_visibility", length = 20)
+    private com.iflytek.skillhub.domain.skill.SkillVisibility requestedVisibility;
+
+    @Column(name = "visibility_scan_task_id", length = 100)
+    private String visibilityScanTaskId;
+
+    @Column(name = "visibility_version_id")
+    private Long visibilityVersionId;
+
+    @Column(name = "avatar_candidate_id")
+    private Long avatarCandidateId;
+
+    @Column(name = "avatar_removal_active_id")
+    private Long avatarRemovalActiveId;
+    @Column(name = "avatar_removal_pending_id")
+    private Long avatarRemovalPendingId;
+
+    @Column(name = "avatar_removal", nullable = false)
+    private boolean avatarRemoval;
+
     @Column(name = "namespace_id", nullable = false)
     private Long namespaceId;
 
@@ -98,6 +123,44 @@ public class ReviewTask {
         task.submittedBy = submittedBy;
         return task;
     }
+
+    public static ReviewTask forSkillMetadata(Long skillId, Long namespaceId, String actor, Long candidateId) {
+        ReviewTask task = new ReviewTask();
+        task.skillId = skillId;
+        task.subjectType = ReviewSubjectType.SKILL_METADATA;
+        task.subjectId = skillId;
+        task.subjectVersion = "avatar:" + candidateId;
+        task.namespaceId = namespaceId;
+        task.submittedBy = actor;
+        task.avatarCandidateId = candidateId;
+        return task;
+    }
+
+    public static ReviewTask forVisibility(com.iflytek.skillhub.domain.skill.Skill skill,
+            com.iflytek.skillhub.domain.skill.SkillVisibility target, String actor) {
+        ReviewTask task = forSkillMetadata(skill.getId(), skill.getNamespaceId(), actor, null);
+        task.subjectVersion = "visibility:" + java.util.UUID.randomUUID();
+        task.previousVisibility = skill.getVisibility();
+        task.requestedVisibility = target;
+        task.visibilityVersionId = skill.getLatestVersionId();
+        return task;
+    }
+
+    public com.iflytek.skillhub.domain.skill.SkillVisibility getPreviousVisibility() { return previousVisibility; }
+    public com.iflytek.skillhub.domain.skill.SkillVisibility getRequestedVisibility() { return requestedVisibility; }
+    public String getVisibilityScanTaskId() { return visibilityScanTaskId; }
+    public void setVisibilityScanTaskId(String taskId) { visibilityScanTaskId = taskId; }
+    public Long getVisibilityVersionId() { return visibilityVersionId; }
+
+    public Long getAvatarCandidateId() { return avatarCandidateId; }
+    public void setAvatarCandidateId(Long candidateId) { this.avatarCandidateId = candidateId; }
+    public Long getAvatarRemovalActiveId() { return avatarRemovalActiveId; }
+    public Long getAvatarRemovalPendingId() { return avatarRemovalPendingId; }
+    public void prepareAvatarRemoval(Long active, Long pending) {
+        avatarRemoval = true; avatarRemovalActiveId = active; avatarRemovalPendingId = pending;
+    }
+    public boolean isAvatarRemoval() { return avatarRemoval; }
+    public void setAvatarRemoval(boolean removal) { this.avatarRemoval = removal; }
 
     public Long getId() { return id; }
 

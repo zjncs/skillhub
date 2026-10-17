@@ -51,6 +51,8 @@ class ReviewSkillDetailAppServiceTest {
     @Mock
     private SkillDownloadService skillDownloadService;
 
+    @Mock private com.iflytek.skillhub.domain.skill.SkillRepository skills;
+    @Mock private com.iflytek.skillhub.infra.jpa.SkillAvatarCandidateJpaRepository candidates;
     private ReviewSkillDetailAppService service;
 
     @BeforeEach
@@ -73,7 +75,7 @@ class ReviewSkillDetailAppServiceTest {
         Skill skill = createSkill(101L, 20L, "skill-a");
         SkillVersion pending = createVersion(101L, 101L, "1.2.0", SkillVersionStatus.PENDING_REVIEW);
         pending.setParsedMetadataJson("""
-                {"complianceSnapshot":{"schemaVersion":"1.0","items":[{"standard":"mitre-attack","version":"v19.1","controlId":"T1059","evidence":[]}],"digest":"sha256:demo"}}
+                {"name":"skill-a","description":"待审摘要","displayNameOverride":"网页新标题","complianceSnapshot":{"schemaVersion":"1.0","items":[{"standard":"mitre-attack","version":"v19.1","controlId":"T1059","evidence":[]}],"digest":"sha256:demo"}}
                 """);
         SkillVersion published = createVersion(100L, 101L, "1.1.0", SkillVersionStatus.PUBLISHED);
         SkillFile readme = createFile(1L, 101L, "README.md");
@@ -98,6 +100,9 @@ class ReviewSkillDetailAppServiceTest {
         ReviewSkillDetailResponse response = service.getReviewSkillDetail(42L, "admin", Map.of());
 
         assertThat(response.activeVersion()).isEqualTo("1.2.0");
+        assertThat(response.skill().displayName()).isEqualTo("网页新标题");
+        assertThat(response.skill().summary()).isEqualTo("待审摘要");
+        assertThat(response.skill().ownerPreviewVersion().displayName()).isEqualTo("网页新标题");
         assertThat(response.downloadUrl()).isEqualTo("/api/v1/reviews/42/download");
         assertThat(response.documentationPath()).isEqualTo("README.md");
         assertThat(response.documentationContent()).isEqualTo("# demo");
@@ -179,6 +184,39 @@ class ReviewSkillDetailAppServiceTest {
     }
 
     @Test
+    void visibilityReviewAllowsAuthorizedReviewerToInspectTheBoundPrivatePackage() throws Exception {
+        Skill skill = createSkill(101L, 20L, "skill-a");
+        skill.setVisibility(SkillVisibility.PRIVATE); skill.setLatestVersionId(100L);
+        ReviewTask task = ReviewTask.forVisibility(skill, SkillVisibility.PUBLIC, "owner-1");
+        task.setVisibilityScanTaskId("scope-scan"); setField(task, "id", 42L);
+        Namespace namespace = createNamespace(20L, "team-a");
+        SkillVersion published = createVersion(100L, 101L, "1.0.0", SkillVersionStatus.PUBLISHED);
+        var audits = org.mockito.Mockito.mock(com.iflytek.skillhub.domain.security.SecurityAuditRepository.class);
+        var scan = new com.iflytek.skillhub.domain.security.SecurityAudit(100L,
+                com.iflytek.skillhub.domain.security.ScannerType.SKILL_SCANNER, "scope-scan");
+        scan.setScannedAt(Instant.now()); scan.setIsSafe(true);
+        service.configureSecurityAudits(audits);
+        given(audits.findLatestActiveByVersionIdAndScannerType(100L,
+                com.iflytek.skillhub.domain.security.ScannerType.SKILL_SCANNER)).willReturn(Optional.of(scan));
+        given(reviewTaskRepository.findById(42L)).willReturn(Optional.of(task));
+        given(namespaceRepository.findById(20L)).willReturn(Optional.of(namespace));
+        given(rbacService.getUserRoleCodes("admin")).willReturn(Set.of("SKILL_ADMIN"));
+        given(reviewService.canViewReview(task, "admin", namespace.getType(), Map.of(), Set.of("SKILL_ADMIN"))).willReturn(true);
+        given(skillQueryService.getReviewSkillSnapshot(100L)).willReturn(new SkillQueryService.ReviewSkillSnapshotDTO(
+                skill, "Owner", published, published, List.of(published), List.of(createFile(5L, 100L, "SKILL.md")), "SKILL.md", "private package"));
+        given(skillQueryService.getFileContentByVersionId(100L, "SKILL.md"))
+                .willReturn(new ByteArrayInputStream("private package".getBytes()));
+        var download = new SkillDownloadService.DownloadResult(() -> new ByteArrayInputStream(new byte[]{1}), "review.zip", 1, "application/zip", null, true);
+        given(skillDownloadService.downloadReviewVersion(skill, published)).willReturn(download);
+        var detail = service.getReviewSkillDetail(42L, "admin", Map.of());
+        assertThat(detail.documentationContent()).isEqualTo("private package");
+        assertThat(detail.files()).hasSize(1);
+        assertThat(detail.visibilityChange().scanStatus()).isEqualTo("PASSED");
+        assertThat(service.getReviewFileContent(42L, "SKILL.md", "admin", Map.of()).readAllBytes()).isEqualTo("private package".getBytes());
+        assertThat(service.downloadReviewPackage(42L, "admin", Map.of()).filename()).isEqualTo("review.zip");
+    }
+
+    @Test
     void getReviewSkillDetail_rejectsUnauthorizedUser() {
         ReviewTask task = createReviewTask(42L, 101L, 20L, "submitter");
         Namespace namespace = createNamespace(20L, "team-a");
@@ -190,6 +228,28 @@ class ReviewSkillDetailAppServiceTest {
 
         assertThatThrownBy(() -> service.getReviewSkillDetail(42L, "user-9", Map.of()))
                 .isInstanceOf(DomainForbiddenException.class);
+    }
+
+    @Test
+    void removalReadinessBecomesFalseWhenAvatarChangesAfterSubmission() {
+        service.configureAvatars(skills, candidates);
+        var task = new ReviewTask(205L, 101L, 20L, "1.0.1", "owner-1");
+        setField(task, "id", 42L);
+        task.prepareAvatarRemoval(21L, null);
+        var namespace = createNamespace(20L, "team-a");
+        var skill = createSkill(101L, 20L, "skill-a");
+        skill.activateAvatar(21L, SkillVisibility.PUBLIC);
+        var version = createVersion(205L, 101L, "1.0.1", SkillVersionStatus.PENDING_REVIEW);
+        given(reviewTaskRepository.findById(42L)).willReturn(Optional.of(task));
+        given(namespaceRepository.findById(20L)).willReturn(Optional.of(namespace));
+        given(rbacService.getUserRoleCodes("admin")).willReturn(Set.of("SKILL_ADMIN"));
+        given(reviewService.canViewReview(task, "admin", namespace.getType(), Map.of(), Set.of("SKILL_ADMIN"))).willReturn(true);
+        given(skills.findById(101L)).willReturn(Optional.of(skill));
+        given(skillQueryService.getReviewSkillSnapshot(205L)).willReturn(new SkillQueryService.ReviewSkillSnapshotDTO(
+                skill, "Owner", version, null, List.of(version), List.of(), null, null));
+        assertThat(service.getReviewSkillDetail(42L, "admin", Map.of()).avatarChange().readyForApproval()).isTrue();
+        skill.activateAvatar(22L, SkillVisibility.PUBLIC);
+        assertThat(service.getReviewSkillDetail(42L, "admin", Map.of()).avatarChange().readyForApproval()).isFalse();
     }
 
     private ReviewTask createReviewTask(Long reviewId, Long versionId, Long namespaceId, String submittedBy) {

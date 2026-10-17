@@ -36,6 +36,27 @@ export interface SystemAuthSettings {
   updatedAt: string
 }
 
+export interface AvatarReviewSettings {
+  machineEnabled: boolean
+  manualEnabled: boolean
+  version: number
+  updatedAt: string
+}
+
+export interface SkillAvatarStatus {
+  avatarUrl: string | null
+  candidateId: number | null
+  candidateStatus: 'PENDING' | 'ACTIVE' | 'REJECTED' | 'SUPERSEDED' | 'REMOVED' | null
+  machineStatus: 'SKIPPED' | 'PENDING' | 'PROCESSING' | 'PASSED' | 'BLOCKED' | 'ERROR' | null
+  machineNextRetryAt: string | null
+  automaticRetryExhausted: boolean
+  reviewStatus: 'NOT_REQUIRED' | 'PENDING' | 'APPROVED' | 'REJECTED' | 'APPEAL_PENDING' | null
+  reviewReason: string | null
+  candidateUrl: string | null
+  namespace: string
+  slug: string
+}
+
 export interface ExternalRoleGrantRule {
   id: number
   providerCode: string
@@ -232,6 +253,7 @@ export interface BatchMemberResponse {
 
 // Skill types
 export interface SkillSummary {
+  managementState?: components['schemas']['ManagementState'] | null
   id: number
   slug: string
   displayName: string
@@ -252,6 +274,7 @@ export interface SkillSummary {
   ownerPreviewVersion?: SkillLifecycleVersion
   resolutionMode?: string
   complianceSnapshot?: ComplianceSnapshot
+  avatarUrl?: string | null
 }
 
 export type LabelItem = Omit<components['schemas']['SkillLabelDto'], 'slug' | 'type' | 'displayName'> & {
@@ -285,6 +308,8 @@ export interface AdminLabelInput {
 }
 
 export interface SkillLifecycleVersion {
+  displayName?: string
+  summary?: string
   id: number
   version: string
   status: string
@@ -343,8 +368,9 @@ export type SkillDetail = Omit<
     | 'entryForSuites'
     | 'memberOfSuites'
   >,
-  'labels' | 'headlineVersion' | 'publishedVersion' | 'ownerPreviewVersion' | 'entryForSuites' | 'memberOfSuites'
+  'avatarUrl' | 'labels' | 'headlineVersion' | 'publishedVersion' | 'ownerPreviewVersion' | 'entryForSuites' | 'memberOfSuites'
 > & {
+  avatarUrl?: string | null
   labels?: LabelItem[]
   headlineVersion?: SkillLifecycleVersion
   publishedVersion?: SkillLifecycleVersion
@@ -583,7 +609,7 @@ export interface ReviewTask {
   skillVersionId: number | null
   namespace: string
   skillSlug?: string | null
-  version: string
+  version: string | null
   status: 'PENDING' | 'APPROVED' | 'REJECTED'
   submittedBy: string
   submittedByName?: string
@@ -592,10 +618,14 @@ export interface ReviewTask {
   reviewComment?: string
   submittedAt: string
   reviewedAt?: string
-  subjectType?: 'SKILL_VERSION' | 'SUITE_VERSION'
+  subjectType?: 'SKILL_VERSION' | 'SUITE_VERSION' | 'SKILL_METADATA'
   subjectId?: number | null
   subjectVersionId?: number | null
   subjectSlug?: string | null
+  avatarCandidateId?: number | null
+  previousVisibility?: string
+  requestedVisibility?: string
+  avatarRemoval?: boolean
 }
 
 export interface ReviewProgress extends Pick<components['schemas']['ReviewProgressResponse'],
@@ -627,13 +657,25 @@ export interface ReviewProgressPage {
 }
 
 export interface ReviewSkillDetail {
+  visibilityChange?: components['schemas']['VisibilityChange']
   skill: SkillDetail
   versions: SkillVersion[]
   files: SkillFile[]
-  documentationPath?: string
-  documentationContent?: string
-  downloadUrl: string
-  activeVersion: string
+  documentationPath?: string | null
+  documentationContent?: string | null
+  downloadUrl: string | null
+  activeVersion: string | null
+  avatarChange?: ReviewAvatarChange | null
+}
+
+export interface ReviewAvatarChange {
+  candidateId: number | null
+  currentAvatarUrl: string | null
+  candidatePreviewUrl: string | null
+  machineStatus: string | null
+  reviewStatus: string | null
+  readyForApproval: boolean
+  removal: boolean
 }
 
 export type PromotionStatus = 'PENDING' | 'APPROVED' | 'REJECTED'
@@ -772,4 +814,10 @@ export interface NotificationPreferenceItem {
 
 export interface NotificationUnreadCount {
   count: number
+}
+
+/** Read-only, token-free invitation history from the generated API contract. */
+export type NamespaceInvitationHistory = Required<components['schemas']['InvitationHistoryItem']>
+export type NamespaceInvitationHistoryPage = Omit<Required<components['schemas']['InvitationHistoryPage']>, 'items'> & {
+  items: NamespaceInvitationHistory[]
 }

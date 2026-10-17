@@ -1,5 +1,7 @@
 package com.iflytek.skillhub.domain.skill.service;
 
+import com.iflytek.skillhub.domain.review.ReviewAvatarParticipant;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.iflytek.skillhub.domain.event.ReviewSubmittedEvent;
 import com.iflytek.skillhub.domain.event.SkillPublishedEvent;
@@ -76,6 +78,22 @@ public class SkillPublishService {
             SkillVersionStatus.REJECTED
     );
     private static final Logger log = LoggerFactory.getLogger(SkillPublishService.class);
+
+    private ReviewAvatarParticipant avatarParticipant;
+    private SkillVisibilityService visibilityService;
+    @org.springframework.beans.factory.annotation.Autowired
+    public void setVisibilityService(SkillVisibilityService service) { this.visibilityService = service; }
+
+
+    @Autowired
+    public void setAvatarParticipant(ReviewAvatarParticipant participant) {
+        this.avatarParticipant = participant;
+    }
+
+    private void withdrawTask(ReviewTask task) {
+        if (avatarParticipant != null) { avatarParticipant.lock(task); avatarParticipant.withdraw(task); }
+        reviewTaskRepository.delete(task);
+    }
 
     public record PublishResult(
             Long skillId,
@@ -303,6 +321,15 @@ public class SkillPublishService {
         return publishFromEntriesInternal(namespaceSlug, entries, publisherId, visibility, platformRoles, confirmWarnings, false, false);
     }
 
+    @Transactional
+    public PublishResult publishFromEntries(
+            String namespaceSlug, List<PackageEntry> entries, String publisherId,
+            SkillVisibility visibility, Set<String> platformRoles, boolean confirmWarnings,
+            String displayName) {
+        return publishFromEntriesInternal(namespaceSlug, entries, publisherId, visibility, platformRoles,
+                confirmWarnings, false, false, null, displayName);
+    }
+
     /**
      * Publishes one package that was explicitly bound by a confirmed Suite Bundle plan.
      *
@@ -373,8 +400,22 @@ public class SkillPublishService {
                 Set.of(),
                 confirmWarnings,  // confirmWarnings: honour caller's choice for rerelease
                 false,  // forceAutoPublish=false: respect visibility rules
-                true
+                true,
+                null,
+                displayNameOverrideForRerelease(publishedVersion)
         );
+    }
+
+    private String displayNameOverrideForRerelease(SkillVersion source) {
+        if (source.getParsedMetadataJson() == null) {
+            return null;
+        }
+        try {
+            String override = objectMapper.readTree(source.getParsedMetadataJson()).path("displayNameOverride").textValue();
+            return override != null && override.strip().length() <= 200 ? override : null;
+        } catch (java.io.IOException ignored) {
+            return null;
+        }
     }
 
     private PublishResult publishFromEntriesInternal(
@@ -401,6 +442,15 @@ public class SkillPublishService {
             boolean forceAutoPublish,
             boolean bypassMembershipCheck,
             BundlePublicationTarget bundleTarget) {
+        return publishFromEntriesInternal(namespaceSlug, entries, publisherId, visibility, platformRoles,
+                confirmWarnings, forceAutoPublish, bypassMembershipCheck, bundleTarget, null);
+    }
+
+    private PublishResult publishFromEntriesInternal(
+            String namespaceSlug, List<PackageEntry> entries, String publisherId,
+            SkillVisibility visibility, Set<String> platformRoles, boolean confirmWarnings,
+            boolean forceAutoPublish, boolean bypassMembershipCheck,
+            BundlePublicationTarget bundleTarget, String displayName) {
 
         // 1. Find namespace by slug
         Namespace namespace = namespaceRepository.findBySlug(namespaceSlug)
@@ -430,10 +480,10 @@ public class SkillPublishService {
                 .orElseThrow(() -> new DomainBadRequestException("error.skill.publish.skillMd.notFound"));
 
         String skillMdContent = new String(skillMd.content());
-        SkillMetadata metadata = skillMetadataParser.parse(skillMdContent);
+        SkillMetadata metadata = skillMetadataParser.parse(skillMdContent).withDisplayNameOverride(displayName);
         if (metadata.version() == null || metadata.version().isBlank()) {
             String autoVersion = AUTO_VERSION_FORMATTER.format(currentTime());
-            metadata = new SkillMetadata(metadata.name(), metadata.description(), autoVersion, metadata.body(), metadata.frontmatter());
+            metadata = new SkillMetadata(metadata.name(), metadata.description(), autoVersion, metadata.body(), metadata.frontmatter(), metadata.displayNameOverride());
         }
         String skillSlug = SlugValidator.slugify(metadata.name());
         if (bundleTarget != null
@@ -494,6 +544,10 @@ public class SkillPublishService {
                 : resolveBundleTargetSkill(namespace, existingSkills, publisherId, visibility,
                         platformRoles, bundleTarget);
 
+        if (visibilityService != null) {
+            visibilityService.lockedSkill(skill.getId());
+            visibilityService.assertNoPendingVisibility(skill.getId());
+        }
         if (skill.getStatus() == SkillStatus.ARCHIVED) {
             throw new DomainBadRequestException("error.skill.publish.archived", skillSlug);
         }
@@ -508,7 +562,7 @@ public class SkillPublishService {
         if (bundleTarget == null) {
             for (SkillVersion pending : pendingVersions) {
                 reviewTaskRepository.findBySkillVersionIdAndStatus(pending.getId(), ReviewTaskStatus.PENDING)
-                        .ifPresent(reviewTaskRepository::delete);
+                        .ifPresent(this::withdrawTask);
                 pending.setStatus(SkillVersionStatus.UPLOADED);
                 skillVersionRepository.save(pending);
             }
@@ -565,6 +619,29 @@ public class SkillPublishService {
 
         // 9. Upload each file to storage and compute SHA-256
         List<SkillFile> skillFiles = new ArrayList<>();
+        List<String> uploadedKeys = new ArrayList<>();
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCompletion(int result) {
+                    if (result != STATUS_COMMITTED && !uploadedKeys.isEmpty()) {
+                        try {
+                            objectStorageService.deleteObjects(List.copyOf(uploadedKeys));
+                        } catch (RuntimeException failure) {
+                            // Keys contain fresh version IDs only. A failed cleanup must never expose provider secrets.
+                            try {
+                                compensationService.recordRollbackFailure(namespaceSlug, skill.getSlug(),
+                                        List.copyOf(uploadedKeys), failure.getClass().getSimpleName());
+                            } catch (RuntimeException compensationFailure) {
+                                log.warn("Failed to record rolled-back publication cleanup, failureType={}",
+                                        compensationFailure.getClass().getSimpleName());
+                            }
+                            log.warn("Failed to clean rolled-back publication objects, failureType={}",
+                                    failure.getClass().getSimpleName());
+                        }
+                    }
+                }
+            });
+        }
         long totalSize = 0;
 
         Path bundleZip = null;
@@ -615,6 +692,7 @@ public class SkillPublishService {
                 zipOutput.finish();
             }
             for (StagedPackageFile staged : stagedFiles) {
+                uploadedKeys.add(staged.storageKey());
                 try (InputStream stagedInput = Files.newInputStream(staged.path())) {
                     objectStorageService.putObject(
                             staged.storageKey(), stagedInput, staged.size(), staged.contentType());
@@ -626,6 +704,7 @@ public class SkillPublishService {
             }
             String bundleKey = String.format("packages/%d/%d/bundle.zip", skill.getId(), version.getId());
             long bundleSize = Files.size(bundleZip);
+            uploadedKeys.add(bundleKey);
             try (InputStream bundleInput = Files.newInputStream(bundleZip)) {
                 objectStorageService.putObject(
                         bundleKey, bundleInput, bundleSize, "application/zip");
@@ -669,8 +748,11 @@ public class SkillPublishService {
         }
 
         // 12. Update skill metadata and move the published pointer for auto-publish flows
-        skill.setDisplayName(metadata.name());
-        skill.setSummary(metadata.description());
+        // A pending update must not replace the currently published title or summary.
+        if (autoPublish || visibility == SkillVisibility.PRIVATE || skill.getLatestVersionId() == null) {
+            skill.setDisplayName(metadata.displayName());
+            skill.setSummary(metadata.description());
+        }
         if (autoPublish || visibility == SkillVisibility.PRIVATE) {
             // Update latestVersionId for autoPublish or PRIVATE skill (UPLOADED status)
             skill.setLatestVersionId(version.getId());
@@ -762,7 +844,7 @@ public class SkillPublishService {
         // durable governance history. The database detaches those settled attempts from the
         // replaced version while retaining their skill/version snapshot.
         reviewTaskRepository.findBySkillVersionIdAndStatus(version.getId(), ReviewTaskStatus.PENDING)
-                .ifPresent(reviewTaskRepository::delete);
+                .ifPresent(this::withdrawTask);
 
         List<SkillFile> files = skillFileRepository.findByVersionId(version.getId());
         List<String> storageKeys = new ArrayList<>();
@@ -938,6 +1020,7 @@ public class SkillPublishService {
         parsedMetadata.put("version", metadata.version());
         parsedMetadata.put("body", metadata.body());
         parsedMetadata.put("frontmatter", metadata.frontmatter());
+        parsedMetadata.put("displayNameOverride", metadata.displayNameOverride());
         parsedMetadata.put(ComplianceMetadataService.SNAPSHOT_FIELD_NAME, complianceSnapshot);
         return parsedMetadata;
     }
