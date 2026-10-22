@@ -16,7 +16,7 @@ class RuntimeBindingEnvironmentAuthorizationTest {
         var bindings = mock(RuntimeBindingRepository.class);
         var drafts = mock(SkillDraftRepository.class);
         var policy = new ScriptEnvironmentPolicy(() -> List.of("AUTHORING_DEMO"));
-        var service = new RuntimeBindingService(bindings, drafts, new RuntimeBindingValidator(policy));
+        var service = new RuntimeBindingService(bindings, drafts, new RuntimeBindingValidator(policy, new PermissiveSecurityPolicy()));
         when(drafts.findById(7L)).thenReturn(Optional.of(new SkillDraft(1L, "ordinary-member", "test", "test", "digest")));
         when(bindings.findByDraftId(7L)).thenReturn(Optional.empty());
         when(bindings.save(any())).thenAnswer(call -> call.getArgument(0));
@@ -35,7 +35,7 @@ class RuntimeBindingEnvironmentAuthorizationTest {
         var drafts = mock(SkillDraftRepository.class);
         when(drafts.findById(7L)).thenReturn(Optional.of(new SkillDraft(1L, "ordinary-member", "test", "test", "digest")));
         var service = new RuntimeBindingService(bindings, drafts,
-                new RuntimeBindingValidator(new ScriptEnvironmentPolicy(List::of)));
+                new RuntimeBindingValidator(new ScriptEnvironmentPolicy(List::of), new PermissiveSecurityPolicy()));
         assertThatThrownBy(() -> service.saveBinding(7L, "admin", "local-script",
                 Map.of("envAllowlist", List.of("AUTHORING_DEMO")), null, null, Set.of("SUPER_ADMIN")))
                 .isInstanceOf(DomainBadRequestException.class);
@@ -46,10 +46,17 @@ class RuntimeBindingEnvironmentAuthorizationTest {
         var drafts = mock(SkillDraftRepository.class);
         when(drafts.findById(7L)).thenReturn(Optional.of(new SkillDraft(1L, "owner", "test", "test", "digest")));
         var service = new RuntimeBindingService(bindings, drafts,
-                new RuntimeBindingValidator(new ScriptEnvironmentPolicy(() -> List.of("AUTHORING_DEMO"))));
+                new RuntimeBindingValidator(new ScriptEnvironmentPolicy(() -> List.of("AUTHORING_DEMO")), new PermissiveSecurityPolicy()));
         assertThatThrownBy(() -> service.saveBinding(7L, "other-member", "local-script",
                 Map.of("envAllowlist", List.of("AUTHORING_DEMO")), null, null, Set.of()))
                 .isInstanceOf(DomainForbiddenException.class);
         verify(bindings, never()).save(any());
+    }
+
+    /** Layer-agnostic stub: the security policy is not under test here. */
+    static final class PermissiveSecurityPolicy implements AuthoringSecurityPolicy {
+        @Override public String endpointRejection(String url, EndpointUse use) { return null; }
+        @Override public boolean stdioTransportAllowed() { return true; }
+        @Override public boolean envRefAllowed(String name) { return true; }
     }
 }
