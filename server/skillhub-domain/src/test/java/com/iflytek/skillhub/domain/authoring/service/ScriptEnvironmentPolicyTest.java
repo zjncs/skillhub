@@ -60,11 +60,18 @@ class ScriptEnvironmentPolicyTest {
     }
     @Test void configValidationUsesCurrentPolicyWithoutDisclosingValues() {
         var current = new AtomicReference<>(List.of("AUTHORING_DEMO"));
-        var validator = new RuntimeBindingValidator(new ScriptEnvironmentPolicy(current::get));
+        var validator = new RuntimeBindingValidator(new ScriptEnvironmentPolicy(current::get), new PermissiveSecurityPolicy());
         var config = Map.<String, Object>of("interpreter", "sh", "envAllowlist", List.of("AUTHORING_DEMO"));
         assertThat(validator.validate("local-script", config, null, null)).isEmpty();
         current.set(List.of());
         assertThat(validator.validate("local-script", config, null, null))
                 .extracting(finding -> finding.ruleCode()).containsExactly("ENV_ALLOWLIST_FORBIDDEN");
+    }
+
+    /** Layer-agnostic stub: the security policy is not under test here. */
+    static final class PermissiveSecurityPolicy implements AuthoringSecurityPolicy {
+        @Override public String endpointRejection(String url, EndpointUse use) { return null; }
+        @Override public boolean stdioTransportAllowed() { return true; }
+        @Override public boolean envRefAllowed(String name) { return true; }
     }
 }
