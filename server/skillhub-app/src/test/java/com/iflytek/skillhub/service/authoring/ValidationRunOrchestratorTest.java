@@ -34,6 +34,8 @@ class ValidationRunOrchestratorTest {
             mock(com.iflytek.skillhub.domain.authoring.service.RuntimeBindingService.class);
     private final com.iflytek.skillhub.domain.authoring.service.RuntimeBindingValidator bindingValidator =
             mock(com.iflytek.skillhub.domain.authoring.service.RuntimeBindingValidator.class);
+    private final com.iflytek.skillhub.service.authoring.mcp.McpProbeService mcpProbeService =
+            mock(com.iflytek.skillhub.service.authoring.mcp.McpProbeService.class);
 
     @Test
     void duplicateClaimCannotEmitAnActiveRunAsFinished() {
@@ -140,6 +142,6 @@ class ValidationRunOrchestratorTest {
         AuthoringProperties properties = new AuthoringProperties();
         properties.setRunTimeoutMs(timeout);
         return new ValidationRunOrchestrator(runs, drafts, bindings, validator, bindingValidator,
-                java.util.List.of(), broadcaster, properties, executor, timer);
+                mcpProbeService, java.util.List.of(), broadcaster, properties, executor, timer);
     }
 }
