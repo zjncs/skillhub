@@ -159,6 +159,34 @@ skillhub:
         cpus: ${SKILLHUB_AUTHORING_DOCKER_CPUS:1.0}
         pids-limit: ${SKILLHUB_AUTHORING_DOCKER_PIDS_LIMIT:128}
         tmpfs-size: ${SKILLHUB_AUTHORING_DOCKER_TMPFS_SIZE:64m}
+    openai-compatible:
+      # Disabled by default: point it at an OpenAI-compatible endpoint to enable prompt tasks
+      enabled: ${SKILLHUB_AUTHORING_LLM_ENABLED:false}
+      api-key: ${SKILLHUB_AUTHORING_LLM_API_KEY:}
+      default-endpoint: ${SKILLHUB_AUTHORING_LLM_ENDPOINT:}
+      default-model: ${SKILLHUB_AUTHORING_LLM_MODEL:}
+      timeout-ms: ${SKILLHUB_AUTHORING_LLM_TIMEOUT_MS:120000}
+      # rounds of chat-completion (with MCP tool execution between rounds) per prompt task
+      max-tool-rounds: ${SKILLHUB_AUTHORING_LLM_MAX_TOOL_ROUNDS:4}
+      # SSRF guard: set true only for private-network LLM endpoints (e.g. internal vLLM);
+      # loopback/RFC1918 destinations are rejected by default, link-local always
+      allow-private-endpoints: ${SKILLHUB_AUTHORING_LLM_ALLOW_PRIVATE:false}
+    mcp:
+      # SSRF guard for http/sse MCP endpoints: private/loopback addresses are
+      # rejected by default; link-local (cloud metadata) is always rejected
+      allow-private-endpoints: ${SKILLHUB_AUTHORING_MCP_ALLOW_PRIVATE:false}
+      # stdio MCP servers spawn server-side processes — off unless explicitly enabled
+      stdio-enabled: ${SKILLHUB_AUTHORING_MCP_STDIO_ENABLED:false}
+      # server environment variables a binding may reference via envRefs
+      # (comma-separated, e.g. MCP_ECHO_TOKEN,WEATHER_API_KEY)
+      env-allowlist: ${SKILLHUB_AUTHORING_MCP_ENV_ALLOWLIST:}
+      docker:
+        # isolation profile for stdio MCP servers in docker execution mode
+        image: ${SKILLHUB_AUTHORING_MCP_DOCKER_IMAGE:alpine:3.20}
+        memory: ${SKILLHUB_AUTHORING_MCP_DOCKER_MEMORY:256m}
+        cpus: ${SKILLHUB_AUTHORING_MCP_DOCKER_CPUS:1.0}
+        pids-limit: ${SKILLHUB_AUTHORING_MCP_DOCKER_PIDS_LIMIT:128}
+        tmpfs-size: ${SKILLHUB_AUTHORING_MCP_DOCKER_TMPFS_SIZE:64m}
   github-sync:
     discovery-scheduler-interval-ms: ${SKILLHUB_GITHUB_SYNC_DISCOVERY_SCHEDULER_INTERVAL_MS:60000}
     candidate-scheduler-interval-ms: ${SKILLHUB_GITHUB_SYNC_CANDIDATE_SCHEDULER_INTERVAL_MS:60000}
@@ -177,6 +205,7 @@ skillhub:
     active-credential-key-version: ${SKILLHUB_GITHUB_SYNC_ACTIVE_CREDENTIAL_KEY_VERSION:}
     lease-duration: ${SKILLHUB_GITHUB_SYNC_LEASE_DURATION:PT5M}
     repository-check-interval: ${SKILLHUB_GITHUB_SYNC_REPOSITORY_CHECK_INTERVAL:PT24H}
+
 
   suite:
     # Fail closed for deployment modes whose upgrade topology is unknown. Single-instance
