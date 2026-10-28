@@ -15,8 +15,7 @@ import org.springframework.stereotype.Service;
  * of validation task assertions. Rejects embedded plaintext credentials — bindings may
  * only reference server-side credential names. Outbound endpoints, the stdio
  * transport, and environment references are additionally gated by the
- * Structural checks only in this layer; the SSRF/stdio/envRef policy that
- * guards external endpoints arrives with the MCP+security layer.
+ * {@link AuthoringSecurityPolicy} so unsafe bindings are rejected at save time.
  */
 @Service
 public class RuntimeBindingValidator {
@@ -29,7 +28,13 @@ public class RuntimeBindingValidator {
     private static final List<String> TRANSPORTS = List.of("http", "sse", "stdio");
     private static final List<String> INTERPRETERS = List.of("sh", "bash", "python3", "node");
 
-    public RuntimeBindingValidator() {
+    private final ScriptEnvironmentPolicy environmentPolicy;
+    private final AuthoringSecurityPolicy securityPolicy;
+
+    public RuntimeBindingValidator(ScriptEnvironmentPolicy environmentPolicy,
+                                   AuthoringSecurityPolicy securityPolicy) {
+        this.environmentPolicy = environmentPolicy;
+        this.securityPolicy = securityPolicy;
     }
 
     /**
@@ -83,10 +88,16 @@ public class RuntimeBindingValidator {
         Object envAllowlist = config.get("envAllowlist");
         if (envAllowlist instanceof List<?> entries) {
             for (Object entry : entries) {
-                if (entry == null || !ENV_REF_NAME.matcher(entry.toString()).matches()) {
+                if (!(entry instanceof String name) || !ENV_REF_NAME.matcher(name).matches()) {
                     findings.add(FindingDraft.error(ValidationLayer.CONFIG, "ENV_ALLOWLIST_INVALID",
                             "Invalid environment variable name: " + entry));
                 }
+            }
+            try {
+                environmentPolicy.authorize(entries);
+            } catch (IllegalArgumentException exception) {
+                findings.add(FindingDraft.error(ValidationLayer.CONFIG, "ENV_ALLOWLIST_FORBIDDEN",
+                        "Environment selection is not permitted by deployment policy"));
             }
         } else if (envAllowlist != null) {
             findings.add(FindingDraft.error(ValidationLayer.CONFIG, "ENV_ALLOWLIST_INVALID",
@@ -107,6 +118,15 @@ public class RuntimeBindingValidator {
         } else if (!isHttpUrl(endpoint.toString())) {
             findings.add(FindingDraft.error(ValidationLayer.CONFIG, "LLM_ENDPOINT_INVALID",
                     "endpoint must be an http(s) URL: " + endpoint));
+        } else {
+            // these requests carry the server-side API key; the SSRF guard must
+            // approve the destination before any credential can leave the host
+            String rejection = securityPolicy.endpointRejection(
+                    endpoint.toString(), AuthoringSecurityPolicy.EndpointUse.LLM_API);
+            if (rejection != null) {
+                findings.add(FindingDraft.error(ValidationLayer.CONFIG, "LLM_ENDPOINT_BLOCKED",
+                        "openai-compatible endpoint is not allowed: " + rejection));
+            }
         }
         Object model = config.get("model");
         if (model == null || model.toString().isBlank()) {
@@ -142,13 +162,20 @@ public class RuntimeBindingValidator {
             if (endpoint == null || !isHttpUrl(endpoint.toString())) {
                 findings.add(FindingDraft.error(ValidationLayer.CONFIG, "MCP_ENDPOINT_INVALID",
                         "MCP server " + name + " requires an http(s) endpoint"));
+            } else {
+                String rejection = securityPolicy.endpointRejection(
+                        endpoint.toString(), AuthoringSecurityPolicy.EndpointUse.MCP_SERVER);
+                if (rejection != null) {
+                    findings.add(FindingDraft.error(ValidationLayer.CONFIG, "MCP_ENDPOINT_BLOCKED",
+                            "MCP server " + name + " endpoint is not allowed: " + rejection));
+                }
             }
         } else {
-            // stdio servers spawn host-side processes; the enable switch and the
-            // docker isolation that gate them arrive with the security layer
-            findings.add(FindingDraft.error(ValidationLayer.CONFIG, "MCP_STDIO_DISABLED",
-                    "MCP server " + name + " uses the stdio transport, which is not"
-                            + " available yet; use http/sse instead"));
+            if (!securityPolicy.stdioTransportAllowed()) {
+                findings.add(FindingDraft.error(ValidationLayer.CONFIG, "MCP_STDIO_DISABLED",
+                        "MCP server " + name + " uses the stdio transport, which is disabled"
+                                + " (skillhub.authoring.mcp.stdio-enabled=false); use http/sse instead"));
+            }
             Object command = server.get("command");
             if (command == null || command.toString().isBlank()) {
                 findings.add(FindingDraft.error(ValidationLayer.CONFIG, "MCP_COMMAND_MISSING",
@@ -170,6 +197,10 @@ public class RuntimeBindingValidator {
                 if (ref == null || !ENV_REF_NAME.matcher(ref.toString()).matches()) {
                     findings.add(FindingDraft.error(ValidationLayer.CONFIG, "MCP_ENV_REF_INVALID",
                             "MCP server " + name + " has an invalid env reference: " + ref));
+                } else if (!securityPolicy.envRefAllowed(ref.toString())) {
+                    findings.add(FindingDraft.error(ValidationLayer.CONFIG, "MCP_ENV_REF_NOT_ALLOWED",
+                            "MCP server " + name + " may not reference environment variable "
+                                    + ref + " (not in skillhub.authoring.mcp.env-allowlist)"));
                 }
             }
         }
