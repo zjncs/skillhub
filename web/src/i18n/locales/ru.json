@@ -3374,6 +3374,9 @@
       "reload": "Перезагрузить файл"
     },
     "run": {
+      "previewFix": "Просмотреть изменения",
+      "beforeFix": "До",
+      "afterFix": "После",
       "revision": "ревизия",
       "errors": "ошибок: {{count}}",
       "warnings": "предупреждений: {{count}}",

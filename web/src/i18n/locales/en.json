@@ -3372,6 +3372,9 @@
       "reload": "Reload file"
     },
     "run": {
+      "previewFix": "Preview suggested changes",
+      "beforeFix": "Before",
+      "afterFix": "After",
       "revision": "revision",
       "errors": "{{count}} error(s)",
       "warnings": "{{count}} warning(s)",
