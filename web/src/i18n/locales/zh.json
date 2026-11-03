@@ -3345,6 +3345,10 @@
       "saveFirst": "请先保存或放弃文件修改，再开始验证。"
     },
     "files": {
+      "validationScript": "Shell 脚本",
+      "selectScript": "选择脚本",
+      "validationTemplateHint": "生成可编辑的行为测试，预期退出码为 0。运行前需配置脚本运行时。",
+      "generateValidation": "生成 validation.yaml",
       "save": "保存",
       "saved": "文件已保存",
       "create": "新建文件",
