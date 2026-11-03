@@ -19,13 +19,16 @@ afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.
 describe('structure validation results', () => {
   it('loads final findings and refreshes draft validity on completion', async () => {
     vi.mocked(authoringApi.getRun).mockResolvedValue({ id: 8, draftId: 42, status: 'RUNNING', active: true, terminal: false })
-    vi.mocked(authoringApi.listFindings).mockResolvedValueOnce([]).mockResolvedValue([{ id: 1, severity: 'ERROR', ruleCode: 'FRONTMATTER_FIELD_MISSING', filePath: 'SKILL.md', location: 'frontmatter', message: 'Missing description' }])
+    vi.mocked(authoringApi.listFindings).mockResolvedValueOnce([]).mockResolvedValue([{ id: 1, severity: 'ERROR', ruleCode: 'FRONTMATTER_FIELD_MISSING', filePath: 'SKILL.md', location: 'frontmatter', message: 'Missing description', suggestion: { patches: [{ filePath: 'SKILL.md', oldValue: '# Skill', newValue: 'description: Example' }] } }])
     const client = mount()
     client.setQueryData(['authoring', 'draft', 42], { validated: false })
     await screen.findByText('Validation is in progress. Findings will appear here.')
     client.setQueryData(['authoring', 'run', 8], { id: 8, draftId: 42, status: 'FAILED', terminal: true, active: false, errorCount: 1 })
     await screen.findByText('Missing description')
     expect(screen.getByText('SKILL.md · frontmatter')).toBeTruthy()
+    fireEvent.click(screen.getByText('Preview suggested changes'))
+    expect(screen.getByText('# Skill').closest('details')?.open).toBe(true)
+    expect(screen.getByText('description: Example')).toBeTruthy()
     expect(client.getQueryState(['authoring', 'draft', 42])?.isInvalidated).toBe(true)
     expect(screen.queryByRole('button', { name: 'Cancel run' })).toBeNull()
   })

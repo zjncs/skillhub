@@ -3653,6 +3653,9 @@
       "reload": "파일 다시 불러오기"
     },
     "run": {
+      "previewFix": "수정 제안 미리보기",
+      "beforeFix": "수정 전",
+      "afterFix": "수정 후",
       "revision": "수정 버전",
       "errors": "오류 {{count}}개",
       "warnings": "경고 {{count}}개",

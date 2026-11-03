@@ -3371,6 +3371,9 @@
       "reload": "重新加载文件"
     },
     "run": {
+      "previewFix": "预览建议修改",
+      "beforeFix": "修改前",
+      "afterFix": "修改后",
       "revision": "版本",
       "errors": "{{count}} 个错误",
       "warnings": "{{count}} 个警告",

@@ -55,6 +55,26 @@ export function ValidationResults({ runId, draftId }: { runId: number, draftId: 
           <p className="break-words text-sm">{finding.message}</p>
           {finding.filePath && <p className="break-all font-mono text-xs text-muted-foreground">{finding.filePath}{finding.location ? ` · ${finding.location}` : ''}</p>}
           {finding.suggestion?.description && <p className="break-words text-sm text-muted-foreground">{finding.suggestion.description}</p>}
+          {finding.suggestion?.patches?.length ? (
+            <details className="space-y-2">
+              <summary className="cursor-pointer text-sm font-medium">{t('authoring.run.previewFix')}</summary>
+              {finding.suggestion.patches.map((patch, index) => (
+                <div key={index} className="space-y-2 rounded-md border p-3">
+                  <p className="break-all font-mono text-xs">{patch.filePath}</p>
+                  <div className="grid min-w-0 gap-2 sm:grid-cols-2">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium">{t('authoring.run.beforeFix')}</p>
+                      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 text-xs">{patch.oldValue ?? '—'}</pre>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium">{t('authoring.run.afterFix')}</p>
+                      <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-muted p-2 text-xs">{patch.newValue ?? '—'}</pre>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </details>
+          ) : null}
         </li>)}
       </ul>
     </CardContent></Card>
