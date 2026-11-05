@@ -195,6 +195,17 @@ const MyStarsPage = createLazyRouteComponent(() => import('@/pages/dashboard/sta
 const MySubscriptionsPage = createLazyRouteComponent(() => import('@/pages/dashboard/subscriptions'), 'MySubscriptionsPage', dashboardRouteOptions)
 const NotificationsPage = createLazyRouteComponent(() => import('@/pages/notifications'), 'NotificationsPage')
 const TokensPage = createLazyRouteComponent(() => import('@/pages/dashboard/tokens'), 'TokensPage', dashboardRouteOptions)
+const AuthoringDraftsPage = createLazyRouteComponent(() => import('@/pages/authoring/drafts'), 'DraftsPage', dashboardRouteOptions)
+const AuthoringDraftDetailPage = createLazyRouteComponent(
+  () => import('@/pages/authoring/draft-detail'),
+  'DraftDetailPage',
+  dashboardRouteOptions,
+)
+const AuthoringRunDetailPage = createLazyRouteComponent(
+  () => import('@/pages/authoring/run-detail'),
+  'RunDetailPage',
+  dashboardRouteOptions,
+)
 const CliAuthPage = createLazyRouteComponent(() => import('@/pages/cli-auth'), 'CliAuthPage')
 const SecuritySettingsPage = createLazyRouteComponent(
   () => import('@/pages/settings/security'),
@@ -688,6 +699,27 @@ const dashboardTokensRoute = createRoute({
   component: TokensPage,
 })
 
+const authoringDraftsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'dashboard/authoring',
+  beforeLoad: requireAuth,
+  component: AuthoringDraftsPage,
+})
+
+const authoringDraftDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'dashboard/authoring/$draftId',
+  beforeLoad: requireAuth,
+  component: AuthoringDraftDetailPage,
+})
+
+const authoringRunDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'dashboard/authoring/$draftId/runs/$runId',
+  beforeLoad: requireAuth,
+  component: AuthoringRunDetailPage,
+})
+
 const cliAuthRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: 'cli/auth',
@@ -818,6 +850,9 @@ const routeTree = rootRoute.addChildren([
   dashboardSubscriptionsRoute,
   dashboardNotificationsRoute,
   dashboardTokensRoute,
+  authoringDraftsRoute,
+  authoringDraftDetailRoute,
+  authoringRunDetailRoute,
   cliAuthRoute,
   deviceAuthRoute,
   settingsSecurityRoute,
