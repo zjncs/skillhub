@@ -20,6 +20,8 @@ export function DraftFileEditor({ draftId, files, revision, onSaved, onDirtyChan
   const { t } = useTranslation()
   const client = useQueryClient()
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [scriptPath, setScriptPath] = useState('')
+  const [uploadInputVersion, setUploadInputVersion] = useState(0)
   const [newPath, setNewPath] = useState('')
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [busy, setBusy] = useState(false)
@@ -29,6 +31,7 @@ export function DraftFileEditor({ draftId, files, revision, onSaved, onDirtyChan
   const [reloadOpen, setReloadOpen] = useState(false)
   const [editorGeneration, setEditorGeneration] = useState(0)
   const paths = files.flatMap(file => file.path ? [file.path] : []).sort()
+  const scripts = paths.filter(path => path.startsWith('scripts/') && path.endsWith('.sh'))
   const path = selectedPath && paths.includes(selectedPath) ? selectedPath : paths[0] ?? null
   const selected = files.find(file => file.path === path)
   const readKey = ['authoring', 'draft', draftId, 'content', path]
@@ -71,8 +74,8 @@ export function DraftFileEditor({ draftId, files, revision, onSaved, onDirtyChan
       return false
     } finally { setBusy(false) }
   }
-  const create = async () => {
-    const next = newPath.trim().replace(/\\/g, '/').replace(/(^|\/)skill\.md$/i, '$1SKILL.md')
+  const create = async (pathInput: string, content: string) => {
+    const next = pathInput.trim().replace(/\\/g, '/').replace(/(^|\/)skill\.md$/i, '$1SKILL.md')
     if (!next || busy || dirty) return
     // Creating a file must never overwrite an existing resource with empty bytes.
     if (paths.includes(next)) {
@@ -89,10 +92,26 @@ export function DraftFileEditor({ draftId, files, revision, onSaved, onDirtyChan
         throw new Error(t('authoring.files.exists'))
       }
       return authoringApi.saveFile(draftId, {
-        path: next, content: '', expectedRevision: snapshot.revision,
+        path: next, content, expectedRevision: snapshot.revision,
       })
     }, 'authoring.files.created', next)
-    if (created) setNewPath('')
+    return created
+  }
+  const generateValidation = async () => {
+    if (!scripts.includes(scriptPath)) return
+    const content = [
+      'version: 1',
+      'tasks:',
+      '  - name: script-smoke',
+      '    type: script',
+      `    script: ${JSON.stringify(scriptPath)}`,
+      '    timeoutMs: 15000',
+      '    assertions:',
+      '      - type: exit_code',
+      '        equals: 0',
+      '',
+    ].join('\n')
+    await create('validation.yaml', content)
   }
   const upload = async () => {
     if (!uploadFile || !newPath.trim() || busy || dirty) return
@@ -102,7 +121,11 @@ export function DraftFileEditor({ draftId, files, revision, onSaved, onDirtyChan
       path: next, content: await fileToBase64(file), base64: true,
       contentType: file.type || undefined, expectedRevision: revision,
     }), 'authoring.files.uploaded', next)
-    if (ok) { setUploadFile(null); setNewPath('') }
+    if (ok) {
+      setUploadFile(null)
+      setNewPath('')
+      setUploadInputVersion(version => version + 1)
+    }
   }
   return (
     <div className="grid min-w-0 gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
@@ -112,15 +135,31 @@ export function DraftFileEditor({ draftId, files, revision, onSaved, onDirtyChan
         </ul>
         <Label htmlFor="new-file-path">{t('authoring.files.path')}</Label>
         <Input id="new-file-path" value={newPath} disabled={busy || dirty} onChange={event => setNewPath(event.target.value)} placeholder="scripts/run.py" />
-        <Button size="sm" variant="outline" onClick={() => void create()} disabled={busy || dirty || !newPath.trim()}>{t('authoring.files.create')}</Button>
+        <Button size="sm" variant="outline" onClick={async () => { if (await create(newPath, '')) setNewPath('') }} disabled={busy || dirty || !newPath.trim()}>{t('authoring.files.create')}</Button>
         <Label htmlFor="upload-file">{t('authoring.files.upload')}</Label>
-        <Input id="upload-file" type="file" disabled={busy || dirty} onChange={event => {
+        <Input key={uploadInputVersion} id="upload-file" type="file" disabled={busy || dirty} onChange={event => {
           const file = event.target.files?.[0] ?? null
           setUploadFile(file)
           if (file && !newPath.trim()) setNewPath(`assets/${file.name}`)
         }} />
         <p className="text-xs text-muted-foreground">{t('authoring.files.replaceHint')}</p>
         <Button size="sm" variant="outline" onClick={() => void upload()} disabled={busy || dirty || !uploadFile || !newPath.trim()}>{t(busy ? 'authoring.files.uploading' : 'authoring.files.uploadConfirm')}</Button>
+        {scripts.length > 0 && !paths.includes('validation.yaml') && (
+          <div className="grid gap-2 border-t pt-3">
+            <Label htmlFor="validation-script">{t('authoring.files.validationScript')}</Label>
+            <select id="validation-script" value={scriptPath} disabled={busy || dirty}
+              onChange={event => setScriptPath(event.target.value)}
+              className="min-w-0 rounded-md border bg-background px-2 py-1 text-sm">
+              <option value="">{t('authoring.files.selectScript')}</option>
+              {scripts.map(script => <option key={script} value={script}>{script}</option>)}
+            </select>
+            <p className="text-xs text-muted-foreground">{t('authoring.files.validationTemplateHint')}</p>
+            <Button size="sm" variant="outline" disabled={busy || dirty || !scripts.includes(scriptPath)}
+              onClick={() => void generateValidation()}>
+              {t('authoring.files.generateValidation')}
+            </Button>
+          </div>
+        )}
       </div>
       <div className="min-w-0 space-y-3">
         {!path && <p>{t('authoring.files.empty')}</p>}

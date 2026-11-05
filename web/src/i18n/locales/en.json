@@ -3346,6 +3346,10 @@
       "saveFirst": "Save or discard file changes before starting validation."
     },
     "files": {
+      "validationScript": "Shell script",
+      "selectScript": "Select a script",
+      "validationTemplateHint": "Creates an editable behavior test that expects exit code 0. Running it requires a configured script runtime.",
+      "generateValidation": "Generate validation.yaml",
       "save": "Save",
       "saved": "File saved",
       "create": "Create file",
