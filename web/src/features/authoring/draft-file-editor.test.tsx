@@ -84,6 +84,21 @@ describe('draft files', () => {
     }))
   })
 
+  it('preserves a validation spec created by another session', async () => {
+    vi.mocked(authoringApi.listFiles).mockResolvedValue([
+      { path: 'scripts/test.sh' },
+      { path: 'validation.yaml' },
+    ])
+    mount()
+    await screen.findByLabelText('File content')
+    fireEvent.change(screen.getByLabelText('Shell script'), { target: { value: 'scripts/test.sh' } })
+    const generate = screen.getByRole<HTMLButtonElement>('button', { name: 'Generate validation.yaml' })
+    fireEvent.click(generate)
+    await waitFor(() => expect(authoringApi.listFiles).toHaveBeenCalledWith(42))
+    await waitFor(() => expect(generate.disabled).toBe(false))
+    expect(authoringApi.saveFile).not.toHaveBeenCalled()
+  })
+
   it('uses server encoding rather than an extension to protect binary bytes', async () => {
     vi.mocked(authoringApi.readFile).mockResolvedValue({ content: '/wAB', encoding: 'base64', sha256: 'binary' })
     mount()

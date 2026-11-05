@@ -67,6 +67,16 @@ test('creates a draft, edits files and rechecks structure using merged APIs', as
     const invalidated = await page.request.get(`/api/web/authoring/drafts/${draftId}`)
     expect((await invalidated.json()).data.validated).toBe(false)
 
+    await page.getByLabel('Path', { exact: true }).fill('scripts/check.sh')
+    await page.getByRole('button', { name: 'Create file', exact: true }).click()
+    await expect(page.getByRole('button', { name: 'scripts/check.sh', exact: true })).toBeVisible()
+    await page.getByLabel('Shell script').selectOption('scripts/check.sh')
+    await page.getByRole('button', { name: 'Generate validation.yaml' }).click()
+    await expect(editor).toHaveValue(/script: "scripts\/check\.sh"/)
+    const template = await page.request.get(`/api/web/authoring/drafts/${draftId}/files/content?path=validation.yaml`)
+    expect((await template.json()).data.content).toContain('equals: 0')
+    await expect(page.getByRole('button', { name: 'Generate validation.yaml' })).toHaveCount(0)
+
     // Private draft and content are also refused by the real API without this session.
     const stranger = await page.context().browser()!.newContext({ baseURL: testInfo.project.use.baseURL })
     try {
