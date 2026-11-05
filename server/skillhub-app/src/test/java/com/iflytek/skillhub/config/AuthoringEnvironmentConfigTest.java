@@ -20,12 +20,26 @@ class AuthoringEnvironmentConfigTest {
     @EnableConfigurationProperties(AuthoringProperties.class)
     static class PropertiesConfiguration { }
 
+    /** Supplies the security-policy side of the validator; not under test here. */
+    @Configuration(proxyBeanMethods = false)
+    static class PermissiveSecurityPolicyConfiguration {
+        @org.springframework.context.annotation.Bean
+        com.iflytek.skillhub.domain.authoring.service.AuthoringSecurityPolicy authoringSecurityPolicy() {
+            return new com.iflytek.skillhub.domain.authoring.service.AuthoringSecurityPolicy() {
+                @Override public String endpointRejection(String url, EndpointUse use) { return null; }
+                @Override public boolean stdioTransportAllowed() { return true; }
+                @Override public boolean envRefAllowed(String name) { return true; }
+            };
+        }
+    }
+
     @Test void springContainerInjectsTheSharedPolicyIntoBothEntryPoints() {
         try (var context = new AnnotationConfigApplicationContext()) {
             context.getEnvironment().getPropertySources().addFirst(new MapPropertySource("dummy-deployment", Map.of(
                     "skillhub.authoring.local-script.environment-allowlist", "AUTHORING_DEMO")));
             context.register(PropertiesConfiguration.class, AuthoringEnvironmentConfig.class,
-                    RuntimeBindingValidator.class, LocalScriptRuntimeAdapter.class, InlineScriptCommandBuilder.class);
+                    RuntimeBindingValidator.class, LocalScriptRuntimeAdapter.class, InlineScriptCommandBuilder.class,
+                    PermissiveSecurityPolicyConfiguration.class);
             context.refresh();
             var validator = context.getBean(RuntimeBindingValidator.class);
             assertThat(context.getBean(LocalScriptRuntimeAdapter.class).agentType()).isEqualTo("local-script");

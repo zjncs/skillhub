@@ -26,6 +26,7 @@ import com.iflytek.skillhub.domain.authoring.validation.ValidationLayer;
 import com.iflytek.skillhub.domain.authoring.validation.ValidationRun;
 import com.iflytek.skillhub.domain.authoring.validation.ValidationRunStatus;
 import com.iflytek.skillhub.domain.shared.exception.DomainConflictException;
+import com.iflytek.skillhub.service.authoring.mcp.McpProbeService;
 import com.iflytek.skillhub.domain.skill.validation.PackageEntry;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -54,10 +55,6 @@ import org.springframework.stereotype.Service;
  * the runtime binding and probes declared MCP servers; the BEHAVIOR layer executes
  * the spec's tasks through the bound runtime adapter and evaluates assertions.
  *
- * <p>The MCP probe of declared servers and the OpenAI-compatible prompt
- * adapter arrive with the MCP+security layer; this layer executes script
- * tasks through the local-script (inline or docker) adapter.
- *
  * <p>Run lifecycle hardening follows the merged upstream review: one FutureTask per
  * run (duplicate submits are ignored), a hard wall-clock watchdog on the timer,
  * cancellation settles first and then interrupts the worker, and the terminal
@@ -75,6 +72,7 @@ public class ValidationRunOrchestrator {
     private final RuntimeBindingService bindingService;
     private final DraftStructureValidator structureValidator;
     private final RuntimeBindingValidator bindingValidator;
+    private final McpProbeService mcpProbeService;
     private final ValidationSpecParser specParser = new ValidationSpecParser();
     private final AssertionEvaluator assertionEvaluator = new AssertionEvaluator();
     private final List<SkillRuntimeAdapter> adapters;
@@ -90,6 +88,7 @@ public class ValidationRunOrchestrator {
                                      RuntimeBindingService bindingService,
                                      DraftStructureValidator structureValidator,
                                      RuntimeBindingValidator bindingValidator,
+                                     McpProbeService mcpProbeService,
                                      List<SkillRuntimeAdapter> adapters,
                                      ValidationEventBroadcaster broadcaster,
                                      AuthoringProperties properties,
@@ -100,6 +99,7 @@ public class ValidationRunOrchestrator {
         this.bindingService = bindingService;
         this.structureValidator = structureValidator;
         this.bindingValidator = bindingValidator;
+        this.mcpProbeService = mcpProbeService;
         this.adapters = List.copyOf(adapters);
         this.broadcaster = broadcaster;
         this.properties = properties;
@@ -296,6 +296,24 @@ public class ValidationRunOrchestrator {
                         binding.getToolAllowlist(),
                         binding.getMcpServers())
                 .forEach(context::recordFinding);
+
+        // declared MCP servers must actually answer before the behavior layer
+        // relies on their tools: connect, initialize, tools/list
+        List<Map<String, Object>> mcpServers = binding.getMcpServers() == null
+                ? List.of() : binding.getMcpServers();
+        if (!mcpServers.isEmpty()) {
+            McpProbeService.ProbeReport probeReport =
+                    mcpProbeService.probe(mcpServers, java.time.Duration.ofSeconds(10));
+            probeReport.findings().forEach(context::recordFinding);
+            for (McpProbeService.ServerProbe serverProbe : probeReport.servers()) {
+                if (serverProbe.connected()) {
+                    emit(context.runId, ValidationEventType.LOG, "CONFIG", Map.of(
+                            "task", "mcp:" + serverProbe.server(), "stream", "summary",
+                            "line", "connected; tools: " + (serverProbe.tools().isEmpty()
+                                    ? "(none)" : String.join(", ", serverProbe.tools()))));
+                }
+            }
+        }
 
         SkillRuntimeAdapter adapter = findAdapter(binding.getAgentType().identifier());
         if (adapter == null) {
